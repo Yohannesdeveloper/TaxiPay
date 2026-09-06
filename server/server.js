@@ -173,11 +173,20 @@ app.post(['/api/telebirr-webhook', '/api/pay'], async (req, res) => {
 
   try {
     if (dbConnected) {
-      // 1. Update seat to 'paid' in PostgreSQL
+      // 0. Ensure trip exists so foreign key is always satisfied
       await pool.query(
-        `UPDATE seats 
-         SET status = 'paid', updated_at = NOW() 
-         WHERE trip_id = $1 AND seat_number = $2`,
+        `INSERT INTO trips (id, taxi_id, plate_number, route_name, fare_per_seat)
+         VALUES ($1, 'ET-TAXI-0492', '3-B76212 AA', 'Bole → Megenagna', $2)
+         ON CONFLICT (id) DO NOTHING`,
+        [tripId, amount || 40]
+      );
+
+      // 1. Upsert seat to 'paid' in PostgreSQL
+      await pool.query(
+        `INSERT INTO seats (trip_id, seat_number, status, updated_at)
+         VALUES ($1, $2, 'paid', NOW())
+         ON CONFLICT (trip_id, seat_number) DO UPDATE
+         SET status = 'paid', updated_at = NOW()`,
         [tripId, seatNumber]
       );
 
