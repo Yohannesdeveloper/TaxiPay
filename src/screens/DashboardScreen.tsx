@@ -5,10 +5,10 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
   Platform,
   StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { QrCode, ShieldCheck, Sparkles, AlertTriangle } from 'lucide-react-native';
 import { useTheme } from '../theme/ThemeContext';
 import { useTranslation } from '../localization/useTranslation';

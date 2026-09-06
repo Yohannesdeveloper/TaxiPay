@@ -4,27 +4,13 @@ import { LivePaymentEvent, Trip, Seat } from '../../types';
 
 import Constants from 'expo-constants';
 
+// Live 24/7 Railway Server URL
+const RAILWAY_PRODUCTION_URL = 'https://taxipay-production.up.railway.app';
+
 function resolveDefaultServerUrl(): string {
-  if (Platform.OS === 'web') {
-    return 'http://localhost:3000';
-  }
-
-  // Automatically detect the host PC's Wi-Fi IP from the active Expo session
-  const hostUri = 
-    Constants.expoConfig?.hostUri || 
-    (Constants as any).manifest?.debuggerHost || 
-    (Constants as any).manifest2?.extra?.expoClient?.hostUri;
-
-  if (hostUri) {
-    const ip = hostUri.split(':')[0];
-    // If it's a valid LAN IP (e.g. 192.168.x.x), use it
-    if (ip && ip !== 'localhost' && !ip.startsWith('127.') && !ip.includes('exp.direct')) {
-      return `http://${ip}:3000`;
-    }
-  }
-
-  // Direct active Wi-Fi IP of your PC
-  return 'http://192.168.1.5:3000';
+  // Always use the live Railway cloud server so mobile phones, 
+  // Expo tunnels, cellular 4G, and web clients connect seamlessly worldwide.
+  return RAILWAY_PRODUCTION_URL;
 }
 
 const DEFAULT_SERVER_URL = resolveDefaultServerUrl();
