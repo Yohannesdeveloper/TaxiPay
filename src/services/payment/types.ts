@@ -3,9 +3,9 @@ import { PaymentAttempt, PaymentStatus } from '../../types';
 export interface CreatePaymentRequestParams {
   taxiId: string;
   tripId: string;
-  seatId: string;
-  seatNumber: number;
-  fareAmount: number;
+  seatIds: string[];
+  seatNumbers: number[];
+  farePerSeat: number;
   currency: string;
 }
 

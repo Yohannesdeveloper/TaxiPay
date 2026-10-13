@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
   ACTIVE_TRIP: '@taxipay_active_trip',
   PLATE_NUMBER: '@taxipay_plate_number',
   RECEIPTS_ARCHIVE: '@taxipay_receipts_archive',
+  DRIVER_PHONE: '@taxipay_driver_phone',
 };
 
 export const saveCapacity = async (count: number): Promise<void> => {
@@ -95,5 +96,22 @@ export const loadReceipts = async (): Promise<Receipt[]> => {
   } catch (e) {
     console.warn('Failed to load receipts', e);
     return [];
+  }
+};
+
+export const saveDriverPhone = async (phone: string): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEYS.DRIVER_PHONE, phone);
+  } catch (e) {
+    console.warn('Failed to save driver phone', e);
+  }
+};
+
+export const loadDriverPhone = async (): Promise<string | null> => {
+  try {
+    return await AsyncStorage.getItem(STORAGE_KEYS.DRIVER_PHONE);
+  } catch (e) {
+    console.warn('Failed to load driver phone', e);
+    return null;
   }
 };

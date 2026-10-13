@@ -1,7 +1,13 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
-import { Seat, Trip, Receipt, PaymentAttempt, SeatStatus, LivePaymentEvent } from '../types';
+import { Seat, Trip, Receipt, PaymentAttempt, SeatStatus, LivePaymentEvent, Settlement } from '../types';
 import { paymentService } from '../services/payment/mockPaymentService';
 import { socketService } from '../services/socket/socketService';
+import { useAccess } from './AccessContext';
+import {
+  completeTrip as completeTripRequest,
+  fetchSettlements,
+  retrySettlement as retrySettlementRequest,
+} from '../services/settlement/settlementService';
 import {
   saveCapacity,
   loadCapacity,
@@ -24,9 +30,12 @@ interface TaxiContextType {
   pendingCount: number;
   unpaidCount: number;
   unresolvedCount: number;
-  activeSheetSeat: Seat | null;
+  // Seats currently shown on the payment sheet. One entry for a normal fare,
+  // several when one passenger is paying for a group.
+  activeSheetSeats: Seat[];
   activeReceipt: Receipt | null;
   openPaymentSheet: (seat: Seat) => Promise<void>;
+  openGroupPaymentSheet: (seats: Seat[]) => Promise<void>;
   closePaymentSheet: () => void;
   openReceiptModal: (seat: Seat) => void;
   closeReceiptModal: () => void;
@@ -52,6 +61,17 @@ interface TaxiContextType {
   // Trip actions
   startNewTrip: (newRoute?: string, newFare?: number, newPlate?: string) => void;
   updateTripDetails: (route: string, fare: number, plate: string, resetSeatsOnSave?: boolean) => void;
+
+  // Per-trip operator fee (5 birr, debited from the driver via Telebirr mandate)
+  feePerTrip: number;
+  driverPhone: string;
+  setDriverPhone: (phone: string) => void;
+  settlements: Settlement[];
+  currentSettlement: Settlement | null;
+  isCompletingTrip: boolean;
+  completeTrip: () => Promise<{ ok: boolean; message: string }>;
+  refreshSettlements: () => Promise<void>;
+  retrySettlement: (id: number) => Promise<{ ok: boolean; message: string }>;
 }
 
 const DEFAULT_TAXI_ID = 'ET-TAXI-0492';
@@ -59,10 +79,16 @@ const DEFAULT_PLATE = '3-B76212 AA';
 const DEFAULT_ROUTE = 'Bole → Megenagna';
 const DEFAULT_FARE = 40;
 const DEFAULT_CAPACITY = 12;
+const DEFAULT_FEE_PER_TRIP = 5;
 
 export const TaxiContext = createContext<TaxiContextType | null>(null);
 
 export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // The driver's Telebirr number lives in AccessContext: it is both the driver's
+  // identity for the activation fee and the wallet the per-trip fee is debited from,
+  // so it must be known before this provider can even mount.
+  const { driverPhone, setDriverPhone } = useAccess();
+
   const [trip, setTrip] = useState<Trip>({
     id: `TRIP-${Date.now().toString().slice(-6)}`,
     taxiId: DEFAULT_TAXI_ID,
@@ -72,11 +98,15 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
     currency: 'ETB',
     startTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     isCompleted: false,
+    feePerTrip: DEFAULT_FEE_PER_TRIP,
   });
 
   const [receipts, setReceipts] = useState<Receipt[]>([]);
-  const [activeSheetSeat, setActiveSheetSeat] = useState<Seat | null>(null);
+  const [activeSheetSeats, setActiveSheetSeats] = useState<Seat[]>([]);
   const [activeReceipt, setActiveReceipt] = useState<Receipt | null>(null);
+
+  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [isCompletingTrip, setIsCompletingTrip] = useState(false);
 
   // Clean initial seats: all 12 seats start clean as UNPAID (no hardcoded paid dummy data)
   const [seats, setSeats] = useState<Seat[]>(() => {
@@ -140,6 +170,7 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
         tripId: trip.id,
         seatId: targetSeat.id,
         seatNumber: event.seatNumber,
+        seatNumbers: [event.seatNumber],
         fare: event.amount || trip.farePerSeat,
         currency: trip.currency,
         timestamp: event.paidAt || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -179,13 +210,10 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return updatedRecs;
       });
 
-      // Update activeSheetSeat if currently open
-      setActiveSheetSeat(curr => {
-        if (curr && curr.seatNumber === event.seatNumber) {
-          return updatedSeat;
-        }
-        return curr;
-      });
+      // Update the open payment sheet if this seat is part of it
+      setActiveSheetSeats(curr =>
+        curr.map(s => (s.seatNumber === event.seatNumber ? updatedSeat : s)),
+      );
 
       const nextSeats = prev.map(s => (s.id === targetSeat.id ? updatedSeat : s));
       saveSeats(nextSeats);
@@ -236,7 +264,45 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const unresolvedCount = pendingCount + unpaidCount;
 
-  // Open Payment Sheet for a seat
+  // Open the payment sheet for one or more seats. When a passenger pays for a
+  // group, a single QR is minted for the whole seat set with the combined fare.
+  const openGroupPaymentSheet = async (list: Seat[]) => {
+    const payable = list.filter(s => s.status !== 'paid');
+    if (payable.length === 0) return;
+
+    // Reuse an in-flight attempt if every selected seat already shares one.
+    const existing = payable.find(s => s.activePayment && s.status === 'pending');
+    if (existing && payable.every(s => s.activePayment?.id === existing.activePayment?.id)) {
+      setActiveSheetSeats(payable);
+      return;
+    }
+
+    // Create fresh payment request for the whole seat set
+    const attempt = await paymentService.createPaymentRequest({
+      taxiId: trip.taxiId,
+      tripId: trip.id,
+      seatIds: payable.map(s => s.id),
+      seatNumbers: payable.map(s => s.seatNumber),
+      farePerSeat: trip.farePerSeat,
+      currency: trip.currency,
+    });
+
+    const updatedSeats: Seat[] = payable.map(s => ({
+      ...s,
+      status: 'pending',
+      activePayment: attempt,
+    }));
+    const byId = new Map(updatedSeats.map(s => [s.id, s]));
+
+    setSeats(prev => {
+      const next = prev.map(s => byId.get(s.id) ?? s);
+      saveSeats(next);
+      return next;
+    });
+    setActiveSheetSeats(updatedSeats);
+  };
+
+  // Open Payment Sheet for a single seat. Paid seats open their receipt instead.
   const openPaymentSheet = async (seat: Seat) => {
     if (seat.status === 'paid') {
       openReceiptModal(seat);
@@ -244,36 +310,15 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     if (seat.activePayment && seat.status === 'pending') {
-      setActiveSheetSeat(seat);
+      setActiveSheetSeats([seat]);
       return;
     }
 
-    // Create fresh payment request
-    const attempt = await paymentService.createPaymentRequest({
-      taxiId: trip.taxiId,
-      tripId: trip.id,
-      seatId: seat.id,
-      seatNumber: seat.seatNumber,
-      fareAmount: trip.farePerSeat,
-      currency: trip.currency,
-    });
-
-    const updatedSeat: Seat = {
-      ...seat,
-      status: 'pending',
-      activePayment: attempt,
-    };
-
-    setSeats(prev => {
-      const next = prev.map(s => (s.id === seat.id ? updatedSeat : s));
-      saveSeats(next);
-      return next;
-    });
-    setActiveSheetSeat(updatedSeat);
+    await openGroupPaymentSheet([seat]);
   };
 
   const closePaymentSheet = () => {
-    setActiveSheetSeat(null);
+    setActiveSheetSeats([]);
   };
 
   const openReceiptModal = (seat: Seat) => {
@@ -302,122 +347,127 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setActiveReceipt(null);
   };
 
-  // Simulate payment confirmation
+  // Simulate payment confirmation for the whole active seat set (one QR).
   const confirmActiveSeatPayment = async () => {
-    if (!activeSheetSeat || !activeSheetSeat.activePayment) return;
+    const attempt = activeSheetSeats.find(s => s.activePayment)?.activePayment;
+    if (!attempt || activeSheetSeats.length === 0) return;
 
-    const verification = await paymentService.simulateScanAndPay(activeSheetSeat.activePayment.id);
-    
-    const paidAttempt: PaymentAttempt = {
-      ...activeSheetSeat.activePayment,
-      status: 'confirmed',
-      transactionRef: verification.transactionRef,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
+    const verification = await paymentService.simulateScanAndPay(attempt.id);
+    const baseRef = verification.transactionRef || `TB-VERIFIED-${Date.now().toString().slice(-4)}`;
+    const paidAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const isGroup = activeSheetSeats.length > 1;
 
-    const updatedSeat: Seat = {
-      ...activeSheetSeat,
-      status: 'paid',
-      activePayment: undefined,
-      lastPayment: paidAttempt,
-    };
+    const updatedSeats: Seat[] = activeSheetSeats.map(seat => {
+      // A shared Telebirr payment gets a per-seat ref so each receipt stays unique.
+      const ref = isGroup ? `${baseRef}-S${seat.seatNumber}` : baseRef;
+      const paidAttempt: PaymentAttempt = {
+        ...(seat.activePayment || attempt),
+        status: 'confirmed',
+        transactionRef: ref,
+        timestamp: paidAt,
+      };
+      return { ...seat, status: 'paid', activePayment: undefined, lastPayment: paidAttempt };
+    });
 
-    const newReceipt: Receipt = {
-      id: `REC-${updatedSeat.id}-${Date.now().toString().slice(-4)}`,
+    const newReceipts: Receipt[] = updatedSeats.map(seat => ({
+      id: `REC-${seat.id}-${seat.seatNumber}-${Date.now().toString().slice(-4)}`,
       tripId: trip.id,
       taxiId: trip.taxiId,
-      seatNumber: updatedSeat.seatNumber,
+      seatNumber: seat.seatNumber,
       plateNumber: trip.plateNumber,
       routeName: trip.routeName,
       fare: trip.farePerSeat,
       currency: trip.currency,
-      transactionRef: verification.transactionRef || `TB-VERIFIED-${Date.now().toString().slice(-4)}`,
-      paidAt: paidAttempt.timestamp,
+      transactionRef: seat.lastPayment?.transactionRef || baseRef,
+      paidAt,
       provider: 'Telebirr (Verified)',
-    };
+    }));
+
+    const byId = new Map(updatedSeats.map(s => [s.id, s]));
 
     setSeats(prev => {
-      const next = prev.map(s => (s.id === updatedSeat.id ? updatedSeat : s));
+      const next = prev.map(s => byId.get(s.id) ?? s);
       saveSeats(next);
       return next;
     });
 
     setReceipts(prev => {
-      const updated = [newReceipt, ...prev];
+      const updated = [...newReceipts, ...prev];
       saveReceipts(updated);
       return updated;
     });
 
-    setActiveSheetSeat(updatedSeat);
+    setActiveSheetSeats(updatedSeats);
   };
 
   // Simulate payment failure
   const failActiveSeatPayment = async (reason = 'Customer canceled telebirr PIN entry') => {
-    if (!activeSheetSeat || !activeSheetSeat.activePayment) return;
+    const attempt = activeSheetSeats.find(s => s.activePayment)?.activePayment;
+    if (!attempt || activeSheetSeats.length === 0) return;
 
-    await paymentService.simulateFailure(activeSheetSeat.activePayment.id, reason);
+    await paymentService.simulateFailure(attempt.id, reason);
 
-    const failedAttempt: PaymentAttempt = {
-      ...activeSheetSeat.activePayment,
-      status: 'failed',
-      errorMessage: reason,
-    };
+    const updatedSeats: Seat[] = activeSheetSeats.map(seat => ({
+      ...seat,
+      activePayment: seat.activePayment
+        ? { ...seat.activePayment, status: 'failed' as const, errorMessage: reason }
+        : seat.activePayment,
+    }));
 
-    const updatedSeat: Seat = {
-      ...activeSheetSeat,
-      activePayment: failedAttempt,
-    };
-
+    const byId = new Map(updatedSeats.map(s => [s.id, s]));
     setSeats(prev => {
-      const next = prev.map(s => (s.id === updatedSeat.id ? updatedSeat : s));
+      const next = prev.map(s => byId.get(s.id) ?? s);
       saveSeats(next);
       return next;
     });
-    setActiveSheetSeat(updatedSeat);
+    setActiveSheetSeats(updatedSeats);
   };
 
   // Simulate timeout
   const timeoutActiveSeatPayment = async () => {
-    if (!activeSheetSeat || !activeSheetSeat.activePayment) return;
+    const attempt = activeSheetSeats.find(s => s.activePayment)?.activePayment;
+    if (!attempt || activeSheetSeats.length === 0) return;
 
-    await paymentService.simulateTimeout(activeSheetSeat.activePayment.id);
+    await paymentService.simulateTimeout(attempt.id);
 
-    const expiredAttempt: PaymentAttempt = {
-      ...activeSheetSeat.activePayment,
-      status: 'expired',
-      errorMessage: 'QR session timed out. Tap to retry.',
-    };
+    const updatedSeats: Seat[] = activeSheetSeats.map(seat => ({
+      ...seat,
+      activePayment: seat.activePayment
+        ? {
+            ...seat.activePayment,
+            status: 'expired' as const,
+            errorMessage: 'QR session timed out. Tap to retry.',
+          }
+        : seat.activePayment,
+    }));
 
-    const updatedSeat: Seat = {
-      ...activeSheetSeat,
-      activePayment: expiredAttempt,
-    };
-
+    const byId = new Map(updatedSeats.map(s => [s.id, s]));
     setSeats(prev => {
-      const next = prev.map(s => (s.id === updatedSeat.id ? updatedSeat : s));
+      const next = prev.map(s => byId.get(s.id) ?? s);
       saveSeats(next);
       return next;
     });
-    setActiveSheetSeat(updatedSeat);
+    setActiveSheetSeats(updatedSeats);
   };
 
-  // Reset active seat to unpaid
+  // Reset the active seat set to unpaid
   const resetActiveSeatToUnpaid = () => {
-    if (!activeSheetSeat) return;
+    if (activeSheetSeats.length === 0) return;
 
-    const updatedSeat: Seat = {
-      ...activeSheetSeat,
+    const updatedSeats: Seat[] = activeSheetSeats.map(seat => ({
+      ...seat,
       status: 'unpaid',
       activePayment: undefined,
       lastPayment: undefined,
-    };
+    }));
 
+    const byId = new Map(updatedSeats.map(s => [s.id, s]));
     setSeats(prev => {
-      const next = prev.map(s => (s.id === updatedSeat.id ? updatedSeat : s));
+      const next = prev.map(s => byId.get(s.id) ?? s);
       saveSeats(next);
       return next;
     });
-    setActiveSheetSeat(updatedSeat);
+    setActiveSheetSeats(updatedSeats);
   };
 
   // Update plate / car number
@@ -479,6 +529,7 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
               tripId: trip.id,
               seatId: s.id,
               seatNumber: s.seatNumber,
+              seatNumbers: [s.seatNumber],
               fare: trip.farePerSeat,
               currency: trip.currency,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -558,7 +609,7 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
       saveSeats(reset);
       return reset;
     });
-    setActiveSheetSeat(null);
+    setActiveSheetSeats([]);
     setActiveReceipt(null);
   };
 
@@ -575,7 +626,7 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSeats(cleanList);
     saveSeats(cleanList);
     saveCapacity(cleanList.length);
-    setActiveSheetSeat(null);
+    setActiveSheetSeats([]);
     setActiveReceipt(null);
   };
 
@@ -592,6 +643,7 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
       currency: 'ETB',
       startTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isCompleted: false,
+      feePerTrip: trip.feePerTrip ?? DEFAULT_FEE_PER_TRIP,
     };
 
     // Reset all seats to fresh unpaid status
@@ -609,7 +661,7 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
     saveTrip(newTripObj);
     saveSeats(resetSeats);
     savePlateNumber(finalPlate);
-    setActiveSheetSeat(null);
+    setActiveSheetSeats([]);
     setActiveReceipt(null);
   };
 
@@ -638,10 +690,118 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }));
       setSeats(resetSeats);
       saveSeats(resetSeats);
-      setActiveSheetSeat(null);
+      setActiveSheetSeats([]);
       setActiveReceipt(null);
     }
   };
+
+  // -------------------------------------------------------------------------
+  // Per-trip operator fee (5 birr -> 0942927999 via Telebirr mandate)
+  // -------------------------------------------------------------------------
+
+  const feePerTrip = trip.feePerTrip ?? DEFAULT_FEE_PER_TRIP;
+
+  const mergeSettlement = useCallback((incoming: Settlement) => {
+    setSettlements(prev => {
+      const idx = prev.findIndex(s => s.id === incoming.id || s.tripId === incoming.tripId);
+      if (idx === -1) return [incoming, ...prev];
+      const next = [...prev];
+      next[idx] = incoming;
+      return next;
+    });
+  }, []);
+
+  const refreshSettlements = useCallback(async () => {
+    try {
+      setSettlements(await fetchSettlements());
+    } catch (e) {
+      console.warn('Could not load settlements', e);
+    }
+  }, []);
+
+  // Server broadcasts when a mandate debit is confirmed by Telebirr.
+  useEffect(() => {
+    const unsubscribe = socketService.onSettlementUpdated((settlement) => {
+      if (settlement) mergeSettlement(settlement);
+    });
+    return unsubscribe;
+  }, [mergeSettlement]);
+
+  const completeTrip = async (): Promise<{ ok: boolean; message: string }> => {
+    if (isCompletingTrip) return { ok: false, message: 'Already finishing this trip.' };
+
+    if (!/^09\d{8}$/.test(driverPhone)) {
+      return {
+        ok: false,
+        message: 'Enter your Telebirr number (09xxxxxxxx) so the fee can be collected.',
+      };
+    }
+
+    setIsCompletingTrip(true);
+    try {
+      const result = await completeTripRequest({
+        tripId: trip.id,
+        driverPhone,
+        feeAmount: feePerTrip,
+      });
+
+      if (result.settlement) mergeSettlement(result.settlement);
+
+      if (result.alreadySettled) {
+        return { ok: true, message: 'This trip fee was already collected.' };
+      }
+
+      if (result.feeWaived) {
+        return { ok: true, message: 'Trip ended. No fee was charged.' };
+      }
+
+      // Mark the trip complete locally regardless. The server keeps the fee as a
+      // record and retries separately, so a failed collection never loses the
+      // fare the passengers already paid.
+      setTrip(prev => {
+        const updated: Trip = {
+          ...prev,
+          isCompleted: true,
+          endTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+        saveTrip(updated);
+        return updated;
+      });
+
+      if (result.awaitingConfirmation) {
+        return { ok: true, message: `Trip ended. ${feePerTrip} birr fee sent to Telebirr.` };
+      }
+
+      return {
+        ok: true,
+        message: `Trip ended. ${feePerTrip} birr fee recorded but not collected yet.`,
+      };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Could not reach the payment server.';
+      return { ok: false, message };
+    } finally {
+      setIsCompletingTrip(false);
+    }
+  };
+
+  const retrySettlement = async (id: number): Promise<{ ok: boolean; message: string }> => {
+    try {
+      const result = await retrySettlementRequest(id);
+      if (result.settlement) mergeSettlement(result.settlement);
+
+      if (result.alreadySettled) return { ok: true, message: 'Already collected.' };
+      if (result.awaitingConfirmation) return { ok: true, message: 'Fee sent to Telebirr.' };
+      return { ok: false, message: result.reason || 'Fee still not collected.' };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Retry failed.';
+      return { ok: false, message };
+    }
+  };
+
+  const currentSettlement = useMemo(
+    () => settlements.find(s => s.tripId === trip.id) || null,
+    [settlements, trip.id],
+  );
 
   return (
     <TaxiContext.Provider
@@ -654,9 +814,10 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
         pendingCount,
         unpaidCount,
         unresolvedCount,
-        activeSheetSeat,
+        activeSheetSeats,
         activeReceipt,
         openPaymentSheet,
+        openGroupPaymentSheet,
         closePaymentSheet,
         openReceiptModal,
         closeReceiptModal,
@@ -674,6 +835,15 @@ export const TaxiProvider: React.FC<{ children: React.ReactNode }> = ({ children
         clearDummyData,
         startNewTrip,
         updateTripDetails,
+        feePerTrip,
+        driverPhone,
+        setDriverPhone,
+        settlements,
+        currentSettlement,
+        isCompletingTrip,
+        completeTrip,
+        refreshSettlements,
+        retrySettlement,
       }}
     >
       {children}

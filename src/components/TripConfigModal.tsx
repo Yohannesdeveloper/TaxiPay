@@ -13,6 +13,7 @@ import { X, Navigation, AlertTriangle, ShieldCheck, Check, RotateCcw, Car } from
 import { useTheme } from '../theme/ThemeContext';
 import { useTranslation } from '../localization/useTranslation';
 import { useTaxi } from '../state/TaxiContext';
+import { SettlementPanel } from './SettlementPanel';
 
 interface TripConfigModalProps {
   visible: boolean;
@@ -187,6 +188,12 @@ export const TripConfigModal: React.FC<TripConfigModalProps> = ({ visible, onClo
                 {t.saveTripSettings} & Reset Seats
               </Text>
             </TouchableOpacity>
+
+            {/* Divider */}
+            <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />
+
+            {/* Per-trip fee + End Trip */}
+            <SettlementPanel />
 
             {/* Divider */}
             <View style={[styles.divider, { backgroundColor: colors.borderSubtle }]} />

@@ -404,7 +404,7 @@
       </div>
 
       <div class="conductor-instruction">
-        🚕 Driver app notified! Your seat card is now marked as PAID.
+        🚕 Driver app notified! Your seat card(s) are now marked as PAID.
       </div>
     </div>
   </div>
@@ -413,13 +413,31 @@
     // Parse URL parameters
     const urlParams = new URLSearchParams(window.location.search);
     const tripId = urlParams.get('tripId') || 'TRIP-DEMO-01';
-    const seatNumber = parseInt(urlParams.get('seat')) || 1;
-    const fare = parseFloat(urlParams.get('fare')) || 25.00;
+
+    // A QR can cover one seat or a group of seats when one passenger pays for
+    // several people. `seats` is the signed list; `seat` is kept for old links.
+    const seatParam = urlParams.get('seats') || urlParams.get('seat') || '1';
+    const seatNumbers = seatParam
+      .split(',')
+      .map((value) => parseInt(value, 10))
+      .filter((n) => Number.isInteger(n) && n > 0);
+
+    const fare = parseFloat(urlParams.get('amount') || urlParams.get('fare')) || 25.00;
     const plate = urlParams.get('plate') || 'AA 3-B12345';
     const route = urlParams.get('route') || 'Megenagna ↔ Stadium';
 
+    // The server signs each QR for this exact trip/seat-set/amount. /api/pay
+    // rejects any request without a matching signature, so these must be echoed back.
+    const sig = urlParams.get('sig') || '';
+    const exp = urlParams.get('exp') || '';
+
+    const seatLabel =
+      seatNumbers.length > 1
+        ? `Seats #${seatNumbers.join(', #')}`
+        : `Seat #${seatNumbers[0] || 1}`;
+
     // Populate UI
-    document.getElementById('seatBadge').innerText = `Seat #${seatNumber}`;
+    document.getElementById('seatBadge').innerText = seatLabel;
     document.getElementById('fareAmount').innerText = fare.toFixed(2);
     document.getElementById('routeInfo').innerText = `${plate} • ${route}`;
     document.getElementById('btnText').innerText = `Confirm & Pay ${fare.toFixed(2)} ETB`;
@@ -447,9 +465,12 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             tripId,
-            seatNumber,
+            seatNumber: seatNumbers[0],
+            seatNumbers,
             amount: fare,
             payerPhone: phone,
+            sig,
+            exp,
           }),
         });
 
@@ -461,7 +482,7 @@
           document.getElementById('successView').style.display = 'block';
 
           document.getElementById('recTxRef').innerText = result.transactionRef;
-          document.getElementById('recSeat').innerText = `Seat #${seatNumber}`;
+          document.getElementById('recSeat').innerText = seatLabel;
           document.getElementById('recAmount').innerText = `${fare.toFixed(2)} ETB`;
           document.getElementById('recTime').innerText = result.paidAt || new Date().toLocaleTimeString();
         } else {

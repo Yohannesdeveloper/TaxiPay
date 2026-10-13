@@ -23,10 +23,14 @@ import { TripConfigModal } from '../components/TripConfigModal';
 import { UnpaidSeatPicker } from '../components/UnpaidSeatPicker';
 import { Seat } from '../types';
 
-export const DashboardScreen: React.FC = () => {
+interface DashboardScreenProps {
+  onOpenAccessAdmin?: () => void;
+}
+
+export const DashboardScreen: React.FC<DashboardScreenProps> = ({ onOpenAccessAdmin }) => {
   const { colors, mode } = useTheme();
   const { t } = useTranslation();
-  const { seats, openPaymentSheet, openReceiptModal } = useTaxi();
+  const { seats, openPaymentSheet, openGroupPaymentSheet, openReceiptModal } = useTaxi();
 
   const [isSeatManagerOpen, setIsSeatManagerOpen] = useState(false);
   const [isTripConfigOpen, setIsTripConfigOpen] = useState(false);
@@ -40,8 +44,8 @@ export const DashboardScreen: React.FC = () => {
     }
   };
 
-  const handleSelectSeatFromPicker = (seat: Seat) => {
-    openPaymentSheet(seat);
+  const handleSelectSeatsFromPicker = (selected: Seat[]) => {
+    openGroupPaymentSheet(selected);
   };
 
   return (
@@ -55,6 +59,7 @@ export const DashboardScreen: React.FC = () => {
         <Header
           onOpenSeatManager={() => setIsSeatManagerOpen(true)}
           onOpenTripConfig={() => setIsTripConfigOpen(true)}
+          onOpenAccessAdmin={onOpenAccessAdmin}
         />
 
         <ScrollView
@@ -143,7 +148,7 @@ export const DashboardScreen: React.FC = () => {
         <UnpaidSeatPicker
           visible={isUnpaidPickerOpen}
           onClose={() => setIsUnpaidPickerOpen(false)}
-          onSelectSeat={handleSelectSeatFromPicker}
+          onSelectSeats={handleSelectSeatsFromPicker}
         />
       </View>
     </SafeAreaView>

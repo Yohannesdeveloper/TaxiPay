@@ -9,28 +9,64 @@ class MockTelebirrPaymentService implements IPaymentService {
 
   public async createPaymentRequest(params: CreatePaymentRequestParams): Promise<PaymentAttempt> {
     const timestamp = new Date().toISOString();
-    const attemptId = `ATTEMPT-${params.tripId.slice(-4)}-S${params.seatNumber}-${Date.now().toString().slice(-6)}`;
-    
-    // Live Passenger Checkout URL: scanning with any phone camera opens the Telebirr payment portal
+    const seats = [...params.seatNumbers].sort((a, b) => a - b);
+    const seatLabel = seats.join(',');
+    const totalAmount = params.farePerSeat * seats.length;
+    const attemptId = `ATTEMPT-${params.tripId.slice(-4)}-S${seatLabel}-${Date.now().toString().slice(-6)}`;
+
+    // The QR link must be signed by the server: /api/pay rejects any request whose
+    // signature does not match this exact trip/seat-set/amount. Building the URL
+    // here would produce an unsigned link that the payment endpoint now refuses.
     const serverUrl = socketService.getServerUrl();
-    const qrPayloadString = `${serverUrl}/pay?tripId=${encodeURIComponent(params.tripId)}&seat=${params.seatNumber}&fare=${params.fareAmount}&currency=${encodeURIComponent(params.currency)}`;
+    const qrPayloadString = await this.requestSignedQrUrl({
+      serverUrl,
+      tripId: params.tripId,
+      seatNumbers: seats,
+      amount: totalAmount,
+    });
 
     const attempt: PaymentAttempt = {
       id: attemptId,
       taxiId: params.taxiId,
       tripId: params.tripId,
-      seatId: params.seatId,
-      seatNumber: params.seatNumber,
-      fare: params.fareAmount,
+      seatId: params.seatIds.join(','),
+      seatNumber: seats[0],
+      seatNumbers: seats,
+      fare: totalAmount,
       currency: params.currency,
       timestamp,
-      status: 'pending',
+      status: qrPayloadString ? 'pending' : 'offline',
       provider: 'telebirr_mock',
       qrPayloadString,
+      errorMessage: qrPayloadString
+        ? undefined
+        : 'Could not reach the payment server to issue a signed QR code.',
     };
 
     this.attempts.set(attemptId, attempt);
     return attempt;
+  }
+
+  private async requestSignedQrUrl(params: {
+    serverUrl: string;
+    tripId: string;
+    seatNumbers: number[];
+    amount: number;
+  }): Promise<string> {
+    const query = new URLSearchParams({
+      tripId: params.tripId,
+      seats: params.seatNumbers.join(','),
+      amount: params.amount.toFixed(2),
+    });
+
+    try {
+      const res = await fetch(`${params.serverUrl}/api/qr?${query.toString()}`);
+      if (!res.ok) return '';
+      const data = await res.json();
+      return typeof data.url === 'string' ? data.url : '';
+    } catch {
+      return '';
+    }
   }
 
   public async checkPaymentStatus(attemptId: string): Promise<PaymentVerificationResult> {

@@ -7,9 +7,10 @@ import { useTranslation } from '../localization/useTranslation';
 interface HeaderProps {
   onOpenSeatManager: () => void;
   onOpenTripConfig: () => void;
+  onOpenAccessAdmin?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onOpenSeatManager, onOpenTripConfig }) => {
+export const Header: React.FC<HeaderProps> = ({ onOpenSeatManager, onOpenTripConfig, onOpenAccessAdmin }) => {
   const { colors, mode, toggleTheme } = useTheme();
   const { t, language, toggleLanguage } = useTranslation();
 
@@ -20,6 +21,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSeatManager, onOpenTripCon
         <TouchableOpacity 
           style={styles.brandContainer} 
           onPress={onOpenTripConfig}
+          // Long-press is the hidden owner entry point for the access admin screen.
+          onLongPress={onOpenAccessAdmin}
+          delayLongPress={700}
           activeOpacity={0.8}
           accessibilityRole="button"
           accessibilityLabel="Open trip settings"

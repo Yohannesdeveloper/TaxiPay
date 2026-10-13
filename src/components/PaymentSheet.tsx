@@ -29,7 +29,7 @@ export const PaymentSheet: React.FC = () => {
   const { colors } = useTheme();
   const { t, language } = useTranslation();
   const {
-    activeSheetSeat,
+    activeSheetSeats,
     closePaymentSheet,
     confirmActiveSeatPayment,
     failActiveSeatPayment,
@@ -38,11 +38,20 @@ export const PaymentSheet: React.FC = () => {
     trip,
   } = useTaxi();
 
-  if (!activeSheetSeat) return null;
+  if (activeSheetSeats.length === 0) return null;
 
-  const payment = activeSheetSeat.activePayment;
+  const seatCount = activeSheetSeats.length;
+  const isGroup = seatCount > 1;
+  const allPaid = activeSheetSeats.every(s => s.status === 'paid');
+  const seatNumbers = activeSheetSeats.map(s => s.seatNumber).sort((a, b) => a - b);
+  const seatLabel = isGroup
+    ? `${t.seat}s #${seatNumbers.join(', #')}`
+    : `${t.seat} #${seatNumbers[0]}`;
+
+  const payment = activeSheetSeats[0].activePayment;
   const status = payment?.status || 'pending';
-  const qrString = payment?.qrPayloadString || `TAXIPAY-DEMO:seat=${activeSheetSeat.seatNumber}`;
+  const qrString = payment?.qrPayloadString || `TAXIPAY-DEMO:seat=${seatNumbers[0]}`;
+  const totalFare = trip.farePerSeat * seatCount;
 
   // Status visual attributes
   let statusBadgeBg = colors.pendingBadgeBg;
@@ -50,7 +59,7 @@ export const PaymentSheet: React.FC = () => {
   let StatusIcon = Clock;
   let statusTitle = t.statusAwaiting;
 
-  if (activeSheetSeat.status === 'paid' || status === 'confirmed') {
+  if (allPaid || status === 'confirmed') {
     statusBadgeBg = colors.paidBadgeBg;
     statusBadgeText = colors.paidText;
     StatusIcon = CheckCircle2;
@@ -74,7 +83,7 @@ export const PaymentSheet: React.FC = () => {
 
   return (
     <Modal
-      visible={!!activeSheetSeat}
+      visible
       animationType="slide"
       transparent={true}
       onRequestClose={closePaymentSheet}
@@ -90,7 +99,7 @@ export const PaymentSheet: React.FC = () => {
           <View style={styles.headerRow}>
             <View>
               <Text style={[styles.seatTitle, { color: colors.textPrimary }]}>
-                {t.seat} #{activeSheetSeat.seatNumber}
+                {seatLabel}
               </Text>
               <Text style={[styles.routeSubtitle, { color: colors.textMuted }]}>
                 {trip.routeName} • {trip.plateNumber}
@@ -113,15 +122,20 @@ export const PaymentSheet: React.FC = () => {
             <View style={[styles.fareCard, { backgroundColor: colors.surfaceElevated, borderColor: colors.borderSubtle }]}>
               <View>
                 <Text style={[styles.fareLabel, { color: colors.textMuted }]}>
-                  {t.passengerFare}
+                  {isGroup ? t.totalFare : t.passengerFare}
                 </Text>
                 <Text style={[styles.fareValue, { color: colors.primaryForest }]}>
-                  {formatCurrency(trip.farePerSeat, language)}
+                  {formatCurrency(totalFare, language)}
                 </Text>
+                {isGroup && (
+                  <Text style={[styles.fareBreakdown, { color: colors.textMuted }]}>
+                    {formatCurrency(trip.farePerSeat, language)} × {seatCount} {t.seat.toLowerCase()}s
+                  </Text>
+                )}
               </View>
               <View style={[styles.attemptPill, { backgroundColor: colors.surface }]}>
                 <Text style={[styles.attemptText, { color: colors.textSecondary }]}>
-                  {payment?.id || `S${activeSheetSeat.seatNumber}`}
+                  {payment?.id || `S${seatNumbers.join('-')}`}
                 </Text>
               </View>
             </View>
@@ -190,7 +204,7 @@ export const PaymentSheet: React.FC = () => {
               </Text>
 
               {/* Action 1: Confirm payment */}
-              {activeSheetSeat.status !== 'paid' && (
+              {!allPaid && (
                 <TouchableOpacity
                   style={[styles.primaryActionBtn, { backgroundColor: colors.primaryLime }]}
                   onPress={confirmActiveSeatPayment}
@@ -208,7 +222,7 @@ export const PaymentSheet: React.FC = () => {
 
               {/* Secondary Simulation Buttons */}
               <View style={styles.simRow}>
-                {activeSheetSeat.status !== 'paid' && (
+                {!allPaid && (
                   <TouchableOpacity
                     style={[styles.simOutlineBtn, { borderColor: colors.borderSubtle, backgroundColor: colors.surface }]}
                     onPress={() => failActiveSeatPayment()}
@@ -321,6 +335,11 @@ const styles = StyleSheet.create({
   fareValue: {
     fontSize: 22,
     fontWeight: '800',
+  },
+  fareBreakdown: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
   },
   attemptPill: {
     paddingHorizontal: 10,

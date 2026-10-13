@@ -80,7 +80,62 @@ export const translations = {
     
     // Unpaid seat picker
     selectSeatForQR: 'Select Unpaid Seat',
+    selectSeatsForQR: 'Select Seats to Pay',
     noUnpaidSeats: 'All seats on this trip are paid! Great job!',
+    payForSeats: 'Pay for {count} seat(s)',
+    selectSeatsHint: 'Tap seats to select passengers. One QR pays for all of them.',
+    totalFare: 'Total Fare',
+
+    // Trip fee (Telebirr mandate)
+    tripFee: 'Trip Fee',
+    tripFeeExplain: 'A {amount} birr fee is sent to {number} via Telebirr when you end a trip.',
+    tripFeeMandateNote: 'You approve this once in the Telebirr app. After that each trip fee is sent automatically.',
+    driverPhoneLabel: 'Your Telebirr Number',
+    driverPhoneHint: '09xxxxxxxx',
+    endTrip: 'End Trip & Send Fee',
+    endingTrip: 'Sending...',
+    tripEnded: 'Trip Ended',
+    feeStatusPending: 'Fee recorded, not collected yet',
+    feeStatusProcessing: 'Fee sent to Telebirr, awaiting confirmation',
+    feeStatusSucceeded: 'Fee collected',
+    feeStatusFailed: 'Fee not collected',
+    retryFee: 'Retry Fee',
+    noFeeRecord: 'No fee has been charged for this trip.',
+    recentFees: 'Recent Trip Fees',
+    feeReason: 'Reason',
+
+    // Activation fee / app lock
+    accessLockedSubtitle: 'Activation required',
+    accessFeeTitle: 'Activation Fee',
+    accessFeeExplain:
+      'A one-time {amount} birr activation fee unlocks TaxiPay for this Telebirr number.',
+    accessFeeMandateNote:
+      'You approve this once in the Telebirr app. After that the app opens without asking again.',
+    accessPayee: 'Send to',
+    accessStatusUnpaid: 'Not activated yet',
+    accessStatusPending: 'Payment not started',
+    accessStatusProcessing: 'Waiting for Telebirr confirmation',
+    accessStatusApproved: 'Activated. Opening the app...',
+    accessStatusRejected: 'Access blocked',
+    accessPayButton: 'Pay & Activate',
+    accessPaying: 'Sending to Telebirr...',
+    accessPayAgain: 'Try the payment again',
+    accessCheckStatus: 'I paid. Check my status',
+    accessChecking: 'Checking with Telebirr...',
+    accessNotConfigured:
+      'The server cannot charge the activation fee yet. Telebirr credentials are not configured, so nobody can be activated.',
+    accessLockedNote:
+      'Every feature stays locked until this activation fee is confirmed by Telebirr.',
+    accessOwnerSignIn: 'Are you the owner? Sign in',
+    accessAttempts: 'attempt',
+    accessApprove: 'Approve',
+    accessRevoke: 'Revoke',
+    accessAdminTitle: 'Owner: Activation Requests',
+    accessAdminPinHint:
+      'Enter the owner PIN to approve or revoke a driver. The PIN is checked on the server.',
+    accessAdminSignIn: 'Sign in',
+    accessAdminEmpty: 'No activation requests yet.',
+    accessAdminRefresh: 'Refresh list',
   },
   am: {
     appName: 'ታክሲፔይ',
@@ -162,7 +217,63 @@ export const translations = {
     plateInputLabel: 'የሰሌዳ ቁጥር',
     
     // Unpaid seat picker
-    selectSeatForQR: 'ያልተከፈለ መቀመጫ ይምረጡ',
+    selectSeatForQR: 'ያልተከፍለ መቀመጫ ይምረጡ',
+    selectSeatsForQR: 'ለመክፈል መቀመጫዎችን ይምረጡ',
     noUnpaidSeats: 'በዚህ ጉዞ ሁሉም መቀመጫዎች ተከፍለዋል! እናመሰግናለን!',
+    payForSeats: 'የ{count} መቀመጫ ክፍያ',
+    selectSeatsHint: 'ተሳፋሪዎችን ለመምረጥ መቀመጫዎችን ይንኩ። አንድ QR ሁሉንም ይከፍላል።',
+    totalFare: 'ጠቅላላ ታሪፍ',
+
+    // Trip fee (Telebirr mandate)
+    tripFee: 'የጉዞ ክፍያ',
+    tripFeeExplain: 'ጉዞውን ሲያጠናቅቅ {amount} ብር ክፍያ በቴሌብር ወደ {number} ይላካል።',
+    tripFeeMandateNote: 'ይህን አንድ ጊዜ በቴሌብር አፕሊኬሽን ታስተያይዳለዎት። ከዚያም የእያንዳንዱ ጉዞ ክፍያ በራሱ ይላካል።',
+    driverPhoneLabel: 'የእርስዎ ቴሌብር ቁጥር',
+    driverPhoneHint: '09xxxxxxxx',
+    endTrip: 'ጉዞ አጠናቅቅ ክፍያ ላክ',
+    endingTrip: 'በመላክ ላይ...',
+    tripEnded: 'ጉዞው ተጠናቅቋል',
+    feeStatusPending: 'ክፍያው ተመዝግቧል፣ ገና አልተሰበሰበም',
+    feeStatusProcessing: 'ክፍያው ወደ ቴሌብር ተልኳል፣ ማረጋገጥ በመጠበቅ ላይ',
+    feeStatusSucceeded: 'ክፍያው ተሰብስቧል',
+    feeStatusFailed: 'ክፍያው አልተሰበሰበም',
+    retryFee: 'ክፍያ እንደገና ላክ',
+    noFeeRecord: 'ለዚህ ጉዞ ክፍያ አልተመዘገበም።',
+    recentFees: 'የቅርብ ጉዞዎች ክፍያዎች',
+    feeReason: 'ምክንያት',
+
+    // Activation fee / app lock
+    accessLockedSubtitle: 'ማስጀመር ያስፈልጋል',
+    accessFeeTitle: 'የማስጀመር ክፍያ',
+    accessFeeExplain:
+      'አንድ ጊዜ የ{amount} ብር የማስጀመር ክፍያ TaxiPay በዚህ ቴሌብር ቁጥር ይከፍታል።',
+    accessFeeMandateNote:
+      'ይህን አንድ ጊዜ በቴሌብር አፕሊኬሽን ታስተያይዳለዎት። ከዚያም አፕል ያለ ድጋፍ ይከፍታል።',
+    accessPayee: 'ወደ',
+    accessStatusUnpaid: 'ገና አልተጀመረም',
+    accessStatusPending: 'ክፍያ አልተጀመረም',
+    accessStatusProcessing: 'የቴሌብር ማረጋገጥ በመጠበቅ ላይ',
+    accessStatusApproved: 'ተጀመሯል። አፕሉ በመክፈት ላይ...',
+    accessStatusRejected: 'መደረስ ተከልክሏል',
+    accessPayButton: 'ክፈል አስጀምር',
+    accessPaying: 'ወደ ቴሌብር በመላክ ላይ...',
+    accessPayAgain: 'ክፍያውን እንደገና ሞክር',
+    accessCheckStatus: 'ከፈልኩ። ሁኔታዬን አረጋግጥ',
+    accessChecking: 'ከቴሌብር ጋር በመጠየቅ ላይ...',
+    accessNotConfigured:
+      'ሰርቨሩ የማስጀመር ክፍያውን እስካሁሉ መቅረብ አይችልም። የቴሌብር መረጃዎች ስለማይተዋቀሩ ማንንም ማስጀመር አይችልም።',
+    accessLockedNote:
+      'ይህ የማስጀመር ክፍያ በቴሌብር ከተረጋገጠ ድረስ ሁሉም ባለሙያዎች ተዘግተዋል።',
+    accessOwnerSignIn: 'እርስዎ ባለቤት ነዎት? ይግቡ',
+    accessAttempts: 'ሙከራ',
+    accessApprove: 'አጽድቅ',
+    accessRevoke: 'ውድቅ አድርግ',
+    accessAdminTitle: 'ባለቤት፡ የማስጀመር ጥያቄዎች',
+    accessAdminPinHint:
+      'የረዳቱን ለማጽደቅ ወይም ለመከለከል የባለቤት ኮድ ያስገቡ። ኮዱ በሰርቨር ይረጋገጣል።',
+    accessAdminSignIn: 'ግባ',
+    accessAdminEmpty: 'እስካሁሉ የማስጀመር ጥያቄ የለም።',
+    accessAdminRefresh: 'ዝርዝር አድስ',
   }
+
 };
